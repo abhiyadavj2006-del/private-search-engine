@@ -1,0 +1,55 @@
+# SearXNG — full private metasearch engine (for a machine WITH Docker)
+#
+# This is the "full version" of project 4. The Python engine in
+# search_engine.py searches only a local corpus; SearXNG searches the
+# web through many public engines while stripping your identity.
+#
+# Setup (on your own machine — Docker is NOT installed on this VM):
+#   1. Install Docker and Docker Compose.
+#   2. Copy this file and the searxng/ folder to a directory, e.g.
+#      ~/searxng/
+#   3. Generate a secret key and put it in .env (see below).
+#   4. docker compose up -d
+#   5. Open http://localhost:8080
+#
+# Secret key — generate once, keep it private:
+#   openssl rand -hex 32
+# Then create a .env file next to this compose file containing:
+#   SEARXNG_SECRET=<the 32-byte hex string from above>
+#
+# Services:
+#   searxng — the search engine itself (port 8080)
+#   redis   — SearXNG's cache / rate-limiter backend (internal only)
+#
+# Data persists in the ./searxng volume (settings + cache). To update:
+#   docker compose pull && docker compose up -d
+# To stop: docker compose down   (add -v to also delete stored data)
+
+services:
+  searxng:
+    image: searxng/searxng:latest
+    container_name: searxng
+    restart: unless-stopped
+    environment:
+      - SEARXNG_BASE_URL=http://localhost:8080/
+      - SEARXNG_SECRET=${SEARXNG_SECRET:?Set SEARXNG_SECRET in .env (openssl rand -hex 32)}
+      # Optional: limit results per page, default search language, etc.
+      # are set in searxng/settings.yml instead of here.
+    volumes:
+      - ./searxng:/etc/searxng:rw
+    ports:
+      - "127.0.0.1:8080:8080"
+    depends_on:
+      - redis
+
+  redis:
+    image: redis:7-alpine
+    container_name: searxng-redis
+    restart: unless-stopped
+    # No published port: only SearXNG talks to Redis, on the internal network.
+    command: redis-server --save 60 1 --loglevel warning
+    volumes:
+      - searxng-redis:/data
+
+volumes:
+  searxng-redis:

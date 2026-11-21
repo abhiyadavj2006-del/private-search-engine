@@ -1,0 +1,26 @@
+# Python
+__pycache__/
+*.py[cod]
+*.egg-info/
+.venv/
+venv/
+
+# Generated search index files (the engine builds its index in memory,
+# but any future on-disk index / cache belongs here, never in git)
+index.json
+index.pkl
+*.idx
+.cache/
+*.sqlite3
+*.db
+
+# SearXNG (full version — see docker-compose.yml)
+.env
+searxng/data/
+searxng/uwsgi.log
+
+# Editor / OS
+.DS_Store
+.idea/
+.vscode/
+*.swp

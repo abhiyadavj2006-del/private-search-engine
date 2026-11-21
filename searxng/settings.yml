@@ -1,0 +1,25 @@
+# SearXNG settings — mounted at /etc/searxng/settings.yml by docker-compose.yml
+# Full reference: https://docs.searxng.org/admin/settings/settings.html
+# Keep this minimal and private: the instance is bound to localhost only.
+
+use_default_settings: true
+
+general:
+  instance_name: "Private Search"
+  debug: false
+  # Only allow the configured base URL; do not expose this publicly
+  # without adding authentication in front of it.
+
+search:
+  safe_search: 1
+  autocomplete: "duckduckgo"
+  default_lang: "auto"
+
+# The built-in limiter is disabled here because the instance is local-only.
+# Re-enable it (remove this block) if you ever expose it to other people.
+limiter:
+  enabled: false
+
+# Redis is provided by the redis service in docker-compose.yml.
+redis:
+  url: redis://redis:6379/0
