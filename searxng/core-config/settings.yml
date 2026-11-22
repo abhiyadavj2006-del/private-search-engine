@@ -1,0 +1,87 @@
+# SearXNG settings — mounted at /etc/searxng/settings.yml by docker-compose.yml
+#
+# Follows NetworkChuck's video "ditch Google!! (build your own PRIVATE
+# search engine)" — https://www.youtube.com/watch?v=ifT6npY39Dw — and the
+# current SearXNG docs: https://docs.searxng.org/admin/settings/settings.html
+#
+# Video chapters this file implements (timestamps from the video):
+#   15:00  Fixing the back button issue  ->  server.method: "GET"
+#   15:40  Cool features                  ->  instance_name, safe_search 2,
+#                                              autocomplete duckduckgo, engines
+#   17:19  Checking stats                 ->  general.enable_metrics (/stats)
+#   17:19  APIs                           ->  search.formats includes json
+#
+# use_default_settings keeps this file short: SearXNG loads its own
+# shipped defaults first, then applies only the keys below.
+
+use_default_settings: true
+
+general:
+  # Video 15:40 — Chuck names his "NetworkChuck Search".
+  instance_name: "Private Search"
+  # Video 17:19 — "enable metrics": powers the /stats page
+  # (engine response times, result counts). On by default upstream;
+  # set explicitly so the video's stats chapter works.
+  enable_metrics: true
+
+server:
+  # The exact URL this instance is reached at. SearXNG builds its links
+  # from this — set it to your https:// domain if you put a reverse
+  # proxy in front. Must match how you actually open it.
+  base_url: "http://localhost:8080/"
+  # Video 15:00 — THE BACK BUTTON FIX. SearXNG defaults to POST, which
+  # breaks the browser back button (and drag-and-drop of search terms).
+  # The video changes this to GET; keep it GET.
+  method: "GET"
+  # Rate limiting / bot protection. Needs the valkey service from
+  # docker-compose.yml — that is why Valkey exists in this stack.
+  # (The video's old stack disabled nothing; the limiter was on by
+  # default there too. Keep it on unless this is localhost-only AND
+  # you have a reason to turn it off.)
+  limiter: true
+  # Proxy image results through your instance instead of letting the
+  # browser fetch them directly from the source site.
+  image_proxy: true
+  # false = private instance (just you / your household). Set true only
+  # if you deliberately share it publicly — it also turns on the image
+  # proxy and link-token bot protection.
+  public_instance: false
+  # secret_key: NOT in this file on purpose. It comes from the
+  # SEARXNG_SECRET variable in .env (see .env.example) — the container
+  # maps $SEARXNG_SECRET to server.secret_key. Never paste a real
+  # secret into this committed file.
+
+search:
+  # Video 15:40 — strict safe search (2), "great for my kids".
+  # 0 = none, 1 = moderate, 2 = strict.
+  safe_search: 2
+  # Video 15:40 — autocomplete backend. No privacy lost: the backend
+  # only sees the characters typed, not who typed them.
+  autocomplete: "duckduckgo"
+  default_lang: "auto"
+  formats:
+    - html
+    # Video 17:19 — "they also have APIs": json enables the search API
+    # (GET /search?q=coffee&format=json). HTML alone is the default.
+    - json
+
+# Valkey (the video's stack called this Redis) — the limiter's backend.
+valkey:
+  url: valkey://valkey:6379/0
+
+# Engines — SearXNG ships 200+ upstream engines (the video said "over
+# 70" in 2022). Disable any you don't want, exactly like the video's
+# "you can say, no, I don't wanna use Google":
+# engines:
+#   - name: google
+#     disabled: true
+# (Entries here override the shipped defaults by engine name.)
+
+# Proxies / Tor — the video mentions these at 15:40 ("you can add
+# proxies for every search... you can add Tor") but does not cover
+# them in depth. If you want them, see:
+# https://docs.searxng.org/admin/settings/settings_outgoing.html
+# outgoing:
+#   proxies:
+#     http:
+#       - http://127.0.0.1:8080

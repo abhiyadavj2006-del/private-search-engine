@@ -1,6 +1,7 @@
 # private-search-engine
 
-A private search engine in pure Python (standard library only).
+A private search engine in pure Python (standard library only) — plus
+the full self-hosted SearXNG setup from the video that inspired it.
 
 It indexes a local corpus of documents on disk and ranks results with
 TF-IDF — no external search engines, no network calls, no API keys,
@@ -12,33 +13,85 @@ a **standalone repo**: it runs on its own, with no dependency on the
 other four projects. (Suggested GitHub repo name:
 `private-search-engine`.)
 
-## What it does
+## Source
 
-- **Indexes a local corpus** — Markdown / text / HTML files — into an
-  in-memory inverted index.
-- **Searches with ranking** — TF-IDF scoring, a ×3 boost for terms in
-  a document's title, and a bonus for an exact-phrase match.
-- **Returns snippets** — each result shows the matching passage, the
-  file it came from, and its score.
-- **Web UI** — a small search page on `http://localhost:8004/`, served
-  by Python's `http.server`. No JavaScript framework, no build step.
+**Video:** "ditch Google!! (build your own PRIVATE search engine)" by
+NetworkChuck — https://www.youtube.com/watch?v=ifT6npY39Dw
+
+**What the video teaches** (from the video page, its chapter list, and
+its full transcript, read via youtubetotranscript.com — the video was
+not watched in a player, so anything below that is not in the
+transcript or the docs is marked as such):
+
+| Video chapter | What it teaches | Where it lives here |
+|---|---|---|
+| 3:15 What is Searx and why is it awesome? | SearXNG is a **metasearch** engine: it asks Google, Bing, DuckDuckGo, Wikipedia… all at once and merges the answers. Privacy comes from a **random search profile per search**, **no ads**, **no data shared with result sites**, and the **server's IP hiding your home IP**. Public vs private instances: a public instance's owner can still read logs — "don't trust anyone, only yourself." | `search_engine.py` mirrors the architecture locally (see below); `corpus/searxng-guide.md` explains it |
+| 7:00 Build our server | Linode cloud server, Ubuntu 20.04, SSH, `apt update && apt upgrade`, Docker + docker-compose + git | README SearXNG setup below |
+| 9:30 How to install Searx | `git clone searxng-docker`, edit hidden `.env` (domain + Let's Encrypt email for SSL), generate a **secret key** into settings, `docker-compose up -d` → 3 containers: **caddy, searxng, redis** | `docker-compose.yml` (modernised — see note) |
+| 12:00 Testing | Search "coffee", results show their source engines; home-lab option: default `.env` → `localhost:8080` (IP privacy benefit lost, the rest kept) | `docker-compose.yml` + `searxng/core-config/settings.yml` |
+| 13:24 Tearing it all down | `docker-compose down`; bringing it back up updates the containers | Same commands, modern spelling |
+| 15:00 Fixing the back button issue | Default HTTP method is **POST**, which breaks the back button → set `server.method: "GET"` in settings.yml | `searxng/core-config/settings.yml` (`method: "GET"`); the local web UI uses a GET form too |
+| 15:40 Cool features | `general.instance_name`, **enable metrics**, **strict safe search (2)**, **autocomplete (DuckDuckGo)**; **70+ engines** enable/disable individually; **add your own searchable databases** (e.g. local MySQL); **proxies / Tor** per search | `searxng/core-config/settings.yml`; local equivalents in `search_engine.py` |
+| 17:19 Checking stats + APIs | `/stats` page (enable metrics first); SearXNG "also has APIs" (JSON) | `/stats` endpoint + `?format=json` in `search_engine.py`; `formats: [html, json]` in settings.yml |
+
+**One honest correction:** the video is from 2022 and its exact
+commands target the old `searxng-docker` repo, which is now
+**deprecated**. The current upstream way is the "compose instancing"
+template in the main SearXNG repo (`core` + `valkey`, no bundled
+Caddy). This project follows the **current** template and maps each
+video step to its modern equivalent in `docker-compose.yml` and
+`.env.example` — the video's ideas are unchanged, only the commands
+moved on. SearXNG itself is also bigger now: 200+ engines instead of
+the video's "over 70".
+
+## What it does (advanced)
+
+- **Metasearch, locally** — like SearXNG queries many upstream
+  engines, this engine queries several independent engines and
+  **merges + dedupes** the results, tagging each result with the
+  engine(s) that returned it:
+  - `corpus` — the sample pages in `corpus/` (the demo corpus)
+  - `projects` — docs of the sibling projects (your "own database")
+  - `extra` — folders from `SEARCH_EXTRA_DIRS`, if you add any
+- **Bangs** — `!corpus redis` / `!projects python` scope a query to
+  one engine, like SearXNG's `!images` / `!wikipedia`.
+- **JSON API** — `?format=json` on the web UI, or
+  `search "…" --json` on the CLI. (The video: SearXNG "also has APIs".)
+- **Autocomplete** — `/autocomplete?q=priv` suggests terms from the
+  index (mirrors the video's autocomplete setting).
+- **Stats** — `/stats` (HTML or `?format=json`) and the `stats`
+  command show index size, uptime, queries served, cache hits, top
+  queries, results per engine (mirrors the video's `/stats` chapter).
+- **Safe search** — levels 0/1/2 via `?safe_search=` or `--safe-search`
+  (default 1; SearXNG side uses 2, strict, exactly as in the video).
+- **Privacy headers + GET forms** — every response sends
+  `Referrer-Policy: no-referrer`, `X-Content-Type-Options: nosniff`,
+  `X-Robots-Tag: noindex, nofollow`; the search form uses GET, which
+  is the video's back-button fix applied to this UI.
+- **Instance name** — `INSTANCE_NAME` env var (default
+  "Private Search"), mirroring `general.instance_name`.
+- **Your own searchable sources** — `SEARCH_EXTRA_DIRS` adds folders
+  as a third engine (the video's "add your own databases").
+- **Result cache** — repeated queries are served from an in-memory
+  cache (`SEARCH_CACHE_TTL`, default 60 s, 0 disables).
 - **Dynamic indexing** — the index is rebuilt from disk on every
   search and on every web request, so documents added later are found
   immediately, with no re-index step and no stale results.
 
 ## What is indexed
 
-Two sources, both scanned at search time:
+Three sources, all scanned at search time:
 
-1. `corpus/` — six sample pages shipped with this repo, so the engine
-   works out of the box:
-   private search, Python standard library, Redis caching, databases
-   and SQL, AI agents, C compiler basics.
+1. `corpus/` — seven sample pages shipped with this repo, so the
+   engine works out of the box: private search, Python standard
+   library, Redis caching, databases and SQL, AI agents, C compiler
+   basics, and the SearXNG video guide.
 2. The sibling projects' documentation (`../` — the `five-projects/`
    tree: `01-redis`, `02-database`, `03-ai-agent`, `05-c-compiler`),
-   if present. When this was tested, the `03-ai-agent` notes were
-   picked up automatically (see "What was tested"). Files added to
-   those projects later are indexed too — nothing is cached on disk.
+   if present. Files added to those projects later are indexed too —
+   nothing is cached on disk.
+3. `SEARCH_EXTRA_DIRS` — extra folders you point the engine at
+   (colon-separated on Linux/macOS, `;` on Windows).
 
 Only `.md`, `.txt`, `.html` / `.htm` files are indexed. `.py` source
 files are deliberately excluded: this is a document search engine,
@@ -56,15 +109,22 @@ cd private-search-engine
 
 # 2a. Search from the command line
 python3 search_engine.py search "private search"
+python3 search_engine.py search "!corpus back button"   # one engine only
+python3 search_engine.py search "private search" --json  # JSON API output
+python3 search_engine.py search "coffee" --engines corpus,projects
 
 # 2b. Or start the web UI (single command)
 python3 search_engine.py serve
 # → open http://localhost:8004/
 
-# 2c. See what is indexed
+# 2c. See what is indexed (per engine)
 python3 search_engine.py index
 
-# 2d. Run the built-in smoke tests
+# 2d. Autocomplete + stats from the CLI
+python3 search_engine.py autocomplete priv
+python3 search_engine.py stats
+
+# 2e. Run the built-in tests (6 baseline + 9 advanced checks)
 python3 search_engine.py test
 ```
 
@@ -76,26 +136,43 @@ python3 search_engine.py serve --port 9000
 PORT=9000 python3 search_engine.py serve
 ```
 
+Environment variables: `PORT` (default `8004`), `INSTANCE_NAME`
+(default `Private Search`), `SAFE_SEARCH` (0/1/2, default 1),
+`SEARCH_CACHE_TTL` (seconds, default 60, 0 disables),
+`SEARCH_EXTRA_DIRS` (extra corpus folders). No secrets, no database
+URL, no API keys.
+
+### Web UI endpoints
+
+| Endpoint | What it does |
+|---|---|
+| `GET /?q=…` | Search page (HTML). `&format=json` for the JSON API, `&engines=corpus,projects` to pick engines, `&safe_search=0/1/2` for safe search. Bangs work in `q` too. |
+| `GET /autocomplete?q=…` | JSON term suggestions, e.g. `{"query": "priv", "suggestions": ["private", …]}` |
+| `GET /stats` | Stats page (HTML, `?format=json` for JSON): docs, uptime, queries, cache hits, top queries |
+
 ## What was tested
 
-Tested 2026-11-21 on this machine (Python 3.12.3), by actually
+Tested 2026-11-22 on this machine (Python 3.12.3), by actually
 running the program — all passed:
 
 | Test | Command | Result |
 |---|---|---|
-| Indexing | `python3 search_engine.py index` | 15 documents, ~1,400 unique terms (6 sample pages + 9 docs found in the sibling projects — proving the dynamic scan works) |
-| Smoke tests | `python3 search_engine.py test` | All passed: 5 queries return the expected page in the top 3, a nonsense query returns nothing |
-| Query 1 | `search "private search"` | #1 private-search-engine (this README, score 40.5); #2 Private Search (corpus page, 22.5) |
-| Query 2 | `search "redis caching"` | #1 Redis Caching (score 21.2) |
-| Query 3 | `search "hiking checklist"` | #1 Hiking checklist — a file from the sibling `03-ai-agent` project, not this repo's own corpus |
-| Query 4 | `search "c compiler"` | #1 c-compiler-in-c (the `05-c-compiler` README, score 42.4); C Compiler Basics in top 3 |
-| No results | `search` with a nonsense word | `No results for "…".` (exit code 1) |
-| Web UI home | `curl http://127.0.0.1:8004/` | 200, search form served |
-| Web UI results | `curl "http://127.0.0.1:8004/?q=redis+caching"` | 200, "1 result(s) for redis caching", Redis Caching score 25.392 |
-| Web UI 404 | `curl http://127.0.0.1:8004/nope` | 404 |
+| Indexing | `python3 search_engine.py index` | 20 documents, 1,851 unique terms (7 sample pages + 13 docs from the sibling projects) |
+| Full test suite | `python3 search_engine.py test` | **All 15 checks passed** (6 baseline + 9 advanced): 5 queries return the expected page in the top 3, a nonsense query returns nothing, engine scoping, bangs, JSON, autocomplete, safe search, extra dirs, cache, and 6 live web-endpoint checks |
+| Query 1 | `search "private search"` | #1 private-search-engine (this README, score 40.1); #2 Private Search (corpus page, 20.0) |
+| Query 2 | `search "redis caching"` | #1 Build Your Own Redis — in Java (score 20.0); Redis Caching in top 3 |
+| Query 3 | `search "!corpus back button"` | #1 SearXNG setup — NetworkChuck video guide (corpus engine only) |
+| Query 4 | `search "private search" --json` | Valid JSON, 10 results, each tagged with its engine |
+| Autocomplete | `autocomplete priv` / `autocomplete sea` | `private`, … / `search, searches, searxng, …` |
+| Stats | `python3 search_engine.py stats` | 20 docs, 1,851 terms, corpus: 7, projects: 13 |
+| Web UI home | `curl http://127.0.0.1:8009/` (via `PORT=8009`) | 200, search form served, `Referrer-Policy: no-referrer` header present |
+| Web UI JSON | `curl "http://127.0.0.1:8009/?q=back+button&format=json"` | 200, 8 results, #1 SearXNG video guide |
+| Autocomplete API | `curl "http://127.0.0.1:8009/autocomplete?q=sea"` | 200, suggestions include `search`, `searxng` |
+| Stats API | `curl http://127.0.0.1:8009/stats?format=json` | 200, documents 20, queries counted |
+| Web UI 404 | `curl http://127.0.0.1:8009/nope` | 404 |
 | `PORT` env var | `PORT=8009 python3 search_engine.py serve` | Served on 8009, not 8004 |
 | `--port` override | `PORT=8009 … serve --port 8010` | Served on 8010 (`--port` wins over `PORT`) |
-| Default port | `python3 search_engine.py serve` | Served on 8004 |
+| SearXNG YAML | `python3 -c "yaml.safe_load(...)"` on both files | `docker-compose.yml` (services `core` + `valkey`) and `searxng/core-config/settings.yml` parse; `method: GET`, `safe_search: 2`, `formats: [html, json]`, `enable_metrics: true`, no `secret_key` in the file |
 
 Note: exact scores shift slightly as sibling projects add documents,
 because IDF depends on the total document count. That is expected —
@@ -111,6 +188,8 @@ the ranking is relative to the corpus at search time.
 - **Simple ranking.** TF-IDF + title boost + phrase bonus. No
   stemming (so "searching" does not match "search"), no synonyms,
   no typo tolerance, no boolean operators, no faceting.
+- **In-memory result cache only.** Restarting the server clears it;
+  there is no shared cache (the SearXNG stack uses Valkey for that).
 - **Single-user, no auth.** The web UI binds `0.0.0.0` (needed for
   hosted deployment) and has no login. Do not expose it to the
   internet without putting authentication in front of it.
@@ -142,31 +221,116 @@ search engine — one that searches the **web** without tracking you —
 is [SearXNG](https://docs.searxng.org/), a metasearch engine that
 forwards queries to many public engines and strips identifying
 information. It needs Docker, so it is **not** run here (Docker is
-not installed on this machine), but the setup is included and ready:
+not installed on this machine), but the setup is included, ready,
+and aligned with the current upstream docs:
 
-- `docker-compose.yml` — SearXNG + Redis, bound to localhost only
-  (`127.0.0.1:8080`)
-- `searxng/settings.yml` — minimal private settings (local-only,
-  limiter disabled, safe search on)
+- `docker-compose.yml` — SearXNG `core` + `valkey`, bound to
+  localhost only (`127.0.0.1:8080`)
+- `.env.example` — copy to `.env`, put your generated secret in it
+- `searxng/core-config/settings.yml` — video-faithful settings:
+  `method: "GET"` (back-button fix), `safe_search: 2` (strict),
+  `autocomplete: "duckduckgo"`, `enable_metrics: true` (`/stats`),
+  `formats: [html, json]` (the JSON API), `limiter: true`,
+  `image_proxy: true`, `instance_name: "Private Search"`
 
 ### SearXNG setup (on a machine with Docker)
 
 ```bash
 # 1. Install Docker and Docker Compose, then copy this repo (or just
-#    docker-compose.yml + searxng/) to the machine, e.g. ~/searxng/
-# 2. Generate a secret key and store it in .env next to the compose file:
+#    docker-compose.yml + .env.example + searxng/) to the machine
+# 2. Copy the env template and generate a secret key:
+cp .env.example .env
 openssl rand -hex 32
-#    then create .env containing:
-#    SEARXNG_SECRET=<the hex string above>
+#    then paste the output into .env as:  SEARXNG_SECRET=<hex string>
 # 3. Start it:
 docker compose up -d
-# 4. Open http://localhost:8080
+# 4. Open http://localhost:8080  (try a search — e.g. "coffee",
+#    the video's example — and look at the source engines listed)
+# Check:  docker compose ps      (two containers: core + valkey)
 # Update: docker compose pull && docker compose up -d
 # Stop:   docker compose down
+# Logs:   docker compose logs -f core
 ```
 
-Never commit the `.env` file — it is in `.gitignore`. Do not expose
-port 8080 publicly without adding authentication in front of it.
+Never commit the `.env` file — it is in `.gitignore`. Never paste a
+real secret into `settings.yml` (the file is committed; the secret
+lives only in `.env` as `SEARXNG_SECRET`). Do not expose port 8080
+publicly without adding authentication in front of it.
+
+### Domain + HTTPS (the video's optional step)
+
+The video set a domain + Let's Encrypt email in `.env` because the
+old stack bundled Caddy. The current template does not bundle a
+reverse proxy, so for a public domain you run your own in front of
+`http://localhost:8080` (Caddy or nginx) and set
+`server.base_url: "https://your-domain/"` in
+`searxng/core-config/settings.yml`. Caddy example (on the Docker
+host, after SearXNG is up):
+
+```
+# Caddyfile
+search.example.com {
+    reverse_proxy 127.0.0.1:8080
+}
+```
+
+Point your domain's A record at the server's public IP first (the
+video's domain step), then Caddy issues the certificate for you.
+
+## What changed in this update (2026-11-22)
+
+From starter to advanced, following the NetworkChuck video's actual
+content (transcript + chapters) and the current SearXNG docs:
+
+- **SearXNG setup modernised:** old `searxng-docker` layout
+  (3 containers, `redis`, `searxng/settings.yml`, `SEARXNG_BASE_URL`
+  env) replaced with the current upstream compose template
+  (`core` + `valkey`, `searxng/core-config/settings.yml`,
+  `.env.example` with `SEARXNG_HOST`/`SEARXNG_PORT`/`SEARXNG_SECRET`).
+- **Settings now implement the video's chapters:** `method: "GET"`
+  (back-button fix), `safe_search: 2`, `autocomplete: "duckduckgo"`,
+  `enable_metrics: true` (`/stats`), `formats: [html, json]`
+  (JSON API), `limiter: true` (now that Valkey exists),
+  `image_proxy: true`, commented engine-disable + proxy examples.
+- **Local engine is now a metasearch engine:** per-engine scoring
+  (`corpus` / `projects` / `extra`), merge + dedupe, engine tags on
+  results, `!bang` scoping, `--engines` selection.
+- **New features:** JSON API, autocomplete endpoint + CLI, `/stats`
+  + `stats` command, safe search levels, privacy headers, instance
+  name, `SEARCH_EXTRA_DIRS`, result cache.
+- **New corpus page** `corpus/searxng-guide.md` summarising the
+  video, so the engine can answer questions about the SearXNG setup
+  itself (try `search "back button"`).
+- **Tests grew from 6 to 15 checks**, all passing; the original 6
+  baseline checks are unchanged and still pass.
+
+## What was intentionally left out, and why
+
+- **Running SearXNG itself** — needs Docker; Docker is not installed
+  on this machine, and the brief forbids nothing else, but there is
+  no Docker host here to run it on. The compose files are validated
+  (YAML parses, keys asserted) but not executed. Run them on any
+  machine with Docker using the steps above.
+- **A public/cloud deployment of SearXNG** — the video deploys to a
+  Linode server with a domain and SSL. That needs a cloud account,
+  a server, and a domain; no accounts were created for this project.
+  The localhost setup is complete; the domain/HTTPS step is
+  documented above instead.
+- **Caddy bundled in the compose file** — the video's stack had it,
+  the current upstream template does not. Adding a third container
+  would diverge from the supported template; the reverse proxy is
+  documented as a separate step instead.
+- **Tor / outgoing proxies in SearXNG** — the video mentions them
+  but explicitly does not cover them ("that'll make this video way
+  too long"). They are a commented pointer in `settings.yml`, not
+  enabled.
+- **A real secret key** — none is generated or committed. The setup
+  requires the user to run `openssl rand -hex 32` once and paste it
+  into `.env`. Shipping a pre-made secret would be worse than none.
+- **Stemming / BM25 / typo tolerance in the local engine** — not in
+  the video, and the README's "Next steps" already lists them as
+  future work. The ranking is unchanged (TF-IDF + title boost +
+  phrase bonus) so the baseline checks still pass.
 
 ## Taking this project live
 
@@ -220,20 +384,24 @@ No secrets, no database URL, no API keys.
 
 ```
 private-search-engine/
-├── README.md            # this file
-├── LICENSE              # MIT
-├── .gitignore           # excludes generated index files, caches, .env
-├── search_engine.py     # the whole engine: indexer, ranking, CLI, web UI
-├── corpus/              # sample pages (the demo corpus)
+├── README.md                  # this file
+├── LICENSE                    # MIT
+├── .gitignore                 # excludes caches, .env (never commit it)
+├── search_engine.py           # the whole engine: metasearch, ranking,
+│                              # CLI, JSON API, autocomplete, /stats, web UI
+├── corpus/                    # sample pages (the demo corpus)
 │   ├── private-search.md
 │   ├── python-stdlib.md
 │   ├── redis-caching.md
 │   ├── databases-sql.md
 │   ├── ai-agents.md
-│   └── c-compiler.md
-├── docker-compose.yml   # SearXNG full version (needs Docker; not run here)
+│   ├── c-compiler.md
+│   └── searxng-guide.md       # the NetworkChuck video, summarised
+├── docker-compose.yml         # SearXNG full version (needs Docker; not run here)
+├── .env.example               # copy to .env, add your SEARXNG_SECRET
 └── searxng/
-    └── settings.yml     # SearXNG settings for the compose setup
+    └── core-config/
+        └── settings.yml       # SearXNG settings for the compose setup
 ```
 
 ## License

@@ -16,8 +16,9 @@ index.pkl
 
 # SearXNG (full version — see docker-compose.yml)
 .env
-searxng/data/
-searxng/uwsgi.log
+# NOTE: searxng/core-config/settings.yml IS committed on purpose — it
+# holds no secret. The only secret is SEARXNG_SECRET, which lives
+# only in .env (never committed, never shared).
 
 # Editor / OS
 .DS_Store

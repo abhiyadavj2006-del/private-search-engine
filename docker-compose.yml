@@ -1,55 +1,87 @@
 # SearXNG — full private metasearch engine (for a machine WITH Docker)
 #
-# This is the "full version" of project 4. The Python engine in
-# search_engine.py searches only a local corpus; SearXNG searches the
-# web through many public engines while stripping your identity.
+# This is the "full version" of project 4: the actual software from
+# NetworkChuck's video "ditch Google!! (build your own PRIVATE search
+# engine)" — https://www.youtube.com/watch?v=ifT6npY39Dw
 #
-# Setup (on your own machine — Docker is NOT installed on this VM):
+# The video (2022) used the old `searxng-docker` repo with THREE
+# containers (caddy + searxng + redis) and `docker-compose up -d`.
+# That repo is now DEPRECATED. The current upstream way — documented at
+# https://docs.searxng.org/admin/installation-docker.html — is the
+# "compose instancing" template this file follows: TWO containers
+# (core + valkey). Each video step maps to its modern equivalent:
+#
+#   video: git clone searxng-docker / cd searxng-docker
+#   now:   mkdir -p searxng/core-config; fetch this file + .env.example
+#          (or just copy this folder — this file already IS the template)
+#   video: nano .env  → set SEARXNG_HOSTNAME + LETSENCRYPT_EMAIL (Caddy SSL)
+#   now:   cp .env.example .env → set SEARXNG_SECRET (required).
+#          Domain + HTTPS are now your own reverse proxy's job (Caddy or
+#          nginx in front of localhost:8080) — see README.md.
+#   video: command that writes a random secret into settings.yml
+#   now:   openssl rand -hex 32  →  paste into .env as SEARXNG_SECRET
+#   video: sudo docker-compose up -d  →  docker ps shows caddy/searxng/redis
+#   now:   docker compose up -d     →  docker compose ps shows core/valkey
+#   video: open http://localhost:8080 (or your domain)
+#   now:   same — http://localhost:8080 by default
+#   video: sudo docker-compose down (teardown / update)
+#   now:   docker compose down  (then `docker compose pull` to update)
+#
+# Setup (on a machine WITH Docker — Docker is NOT installed on this VM):
 #   1. Install Docker and Docker Compose.
-#   2. Copy this file and the searxng/ folder to a directory, e.g.
-#      ~/searxng/
-#   3. Generate a secret key and put it in .env (see below).
+#   2. Copy docker-compose.yml, .env.example and searxng/ to a folder.
+#   3. cp .env.example .env  — then generate a secret and put it in .env:
+#        openssl rand -hex 32
+#      (NEVER commit .env — it is in .gitignore. Never share the secret.)
 #   4. docker compose up -d
 #   5. Open http://localhost:8080
 #
-# Secret key — generate once, keep it private:
-#   openssl rand -hex 32
-# Then create a .env file next to this compose file containing:
-#   SEARXNG_SECRET=<the 32-byte hex string from above>
-#
 # Services:
-#   searxng — the search engine itself (port 8080)
-#   redis   — SearXNG's cache / rate-limiter backend (internal only)
+#   core   — SearXNG itself (port 8080, localhost only by default)
+#   valkey — in-memory store for the rate limiter (internal only).
+#            The video's stack called this "redis"; upstream renamed it
+#            to Valkey. Same job, same settings key (valkey: url).
 #
-# Data persists in the ./searxng volume (settings + cache). To update:
-#   docker compose pull && docker compose up -d
-# To stop: docker compose down   (add -v to also delete stored data)
+# Data persists in the named volumes (core-data = favicon cache etc.,
+# valkey-data = limiter counters). Settings live in
+# ./searxng/core-config/settings.yml — edit it, then restart:
+#   docker compose restart core
+# To update: docker compose pull && docker compose up -d
+# To stop:   docker compose down   (add -v to also delete stored data)
+
+name: searxng
 
 services:
-  searxng:
-    image: searxng/searxng:latest
-    container_name: searxng
+  core:
+    container_name: searxng-core
+    image: docker.io/searxng/searxng:${SEARXNG_VERSION:-latest}
     restart: unless-stopped
+    env_file:
+      - ./.env
     environment:
-      - SEARXNG_BASE_URL=http://localhost:8080/
-      - SEARXNG_SECRET=${SEARXNG_SECRET:?Set SEARXNG_SECRET in .env (openssl rand -hex 32)}
-      # Optional: limit results per page, default search language, etc.
-      # are set in searxng/settings.yml instead of here.
-    volumes:
-      - ./searxng:/etc/searxng:rw
+      # $SEARXNG_SECRET maps to server.secret_key in settings.yml.
+      # Compose refuses to start without it — that is deliberate.
+      - SEARXNG_SECRET=${SEARXNG_SECRET:?Set SEARXNG_SECRET in .env (generate with: openssl rand -hex 32)}
+    # SEARXNG_HOST=127.0.0.1 in .env binds localhost only (private
+    # instance — the video's home-lab option). Unset it to listen on
+    # all interfaces, but only behind authentication / a reverse proxy.
     ports:
-      - "127.0.0.1:8080:8080"
-    depends_on:
-      - redis
-
-  redis:
-    image: redis:7-alpine
-    container_name: searxng-redis
-    restart: unless-stopped
-    # No published port: only SearXNG talks to Redis, on the internal network.
-    command: redis-server --save 60 1 --loglevel warning
+      - "${SEARXNG_HOST:-127.0.0.1}:${SEARXNG_PORT:-8080}:8080"
     volumes:
-      - searxng-redis:/data
+      - ./searxng/core-config:/etc/searxng:rw
+      - core-data:/var/cache/searxng/
+    depends_on:
+      - valkey
+
+  valkey:
+    container_name: searxng-valkey
+    image: docker.io/valkey/valkey:9-alpine
+    command: valkey-server --save 30 1 --loglevel warning
+    restart: unless-stopped
+    # No published port: only SearXNG talks to Valkey, on the internal network.
+    volumes:
+      - valkey-data:/data
 
 volumes:
-  searxng-redis:
+  core-data:
+  valkey-data:
